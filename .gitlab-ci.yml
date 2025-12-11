@@ -7,7 +7,7 @@ stages:
   # - terraform_apply
 
 variables:
-  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+  IMAGE_TAG: $CI_PIPELINE_ID
   DOCKER_IMAGE_NAME: "akshayreddy1155/simple-time-service"
   DOCKER_HOST: tcp://docker:2375/
   DOCKER_DRIVER: overlay2
