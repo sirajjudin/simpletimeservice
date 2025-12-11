@@ -27,4 +27,4 @@ docker_build_and_push_job:
     - docker tag $DOCKER_IMAGE:$IMAGE_TAG $DOCKER_IMAGE:latest
     - docker push $DOCKER_IMAGE:latest
   only:
-    - master
+    - main
