@@ -27,7 +27,7 @@ resource "kubernetes_deployment_v1" "myapp-sts" {
 
       spec {
         container {
-          image = "akshayreddy1155/simple-time-service:v1.0.1"
+          image = var.deploy_image
           name  = "sts-app"
           port {
             container_port = 80
@@ -37,3 +37,4 @@ resource "kubernetes_deployment_v1" "myapp-sts" {
       }
     }
 }
+
