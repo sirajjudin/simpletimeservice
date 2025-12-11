@@ -8,7 +8,7 @@ stages:
 
 variables:
   IMAGE_TAG: $CI_PIPELINE_ID
-  DOCKER_IMAGE_NAME: "akshayreddy1155/simple-time-service"
+  DOCKER_IMAGE: "akshayreddy1155/simple-time-service"
   DOCKER_HOST: tcp://docker:2375/
   DOCKER_DRIVER: overlay2
 
@@ -20,7 +20,7 @@ docker_build_and_push_job:
   variables:
     DOCKER_TLS_CERTDIR: ""
   script:
-    - echo "Building image $DOCKER_IMAGE_NAME:$IMAGE_TAG from ./app"
+    - echo "Building image $DOCKER_IMAGE:$IMAGE_TAG from ./app"
     - docker build -t $DOCKER_IMAGE:$IMAGE_TAG ./app
     - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
     - docker push $DOCKER_IMAGE:$IMAGE_TAG
