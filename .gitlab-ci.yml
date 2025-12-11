@@ -4,7 +4,7 @@ workflow:
 stages:
   - docker_build_and_push
   - terraform_plan
-  # - terraform_apply
+  - terraform_apply
 
 variables:
   IMAGE_TAG: $CI_PIPELINE_ID
