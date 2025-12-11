@@ -59,5 +59,3 @@ terraform_plan:
     paths:
       - terraform/plan.tfplan
     expire_in: 1h
-  tags:
-    - terraform
