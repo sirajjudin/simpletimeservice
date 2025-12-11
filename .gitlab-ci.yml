@@ -30,7 +30,7 @@ docker_build_and_push_job:
 terraform_plan:
   stage: terraform_plan
   image:
-    name: hashicorp/terraform:1.7.8
+    name: hashicorp/terraform:1.14
     entrypoint: [""]
   needs:
     - job: docker_build_and_push_job
