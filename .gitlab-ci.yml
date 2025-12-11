@@ -59,3 +59,33 @@ terraform_plan:
     paths:
       - terraform/plan.tfplan
     expire_in: 1h
+
+terraform_apply:
+  stage: terraform_apply
+  image:
+    name: hashicorp/terraform:1.14
+    entrypoint: [""]
+  needs:
+    - job: terraform_plan
+      artifacts: true
+  before_script:
+    # Export AWS creds for backend / provider if provided
+    - |
+      if [ -n "$AWS_ACCESS_KEY_ID" ]; then
+        export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
+        export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
+        export AWS_DEFAULT_REGION="${AWS_REGION:-ap-south-1}"
+      fi
+    # Write kubeconfig if provided
+    - |
+      if [ -n "$KUBE_CONFIG_DATA" ]; then
+        mkdir -p $CI_PROJECT_DIR
+        echo "$KUBE_CONFIG_DATA" | base64 -d > $CI_PROJECT_DIR/kubeconfig
+        export KUBECONFIG=$CI_PROJECT_DIR/kubeconfig
+      fi
+  script:
+    - cd terraform
+    - terraform init -input=false
+    - terraform apply -input=false -auto-approve plan.tfplan
+  when: manual 
+  allow_failure: false
