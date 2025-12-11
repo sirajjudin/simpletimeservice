@@ -93,8 +93,9 @@ terraform_plan:
 terraform_apply:
   stage: terraform_apply
   # Start from a small image that already has helm
-  image: alpine/helm:4.0.1
-  entrypoint: [""]
+  image: 
+    name: alpine/helm:4.0.1
+    entrypoint: [""]
   needs:
     - job: terraform_plan
       artifacts: true
