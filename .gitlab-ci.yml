@@ -60,22 +60,66 @@ terraform_plan:
       - terraform/plan.tfplan
     expire_in: 1h
 
+# terraform_apply:
+#   stage: terraform_apply
+#   image:
+#     name: hashicorp/terraform:1.14
+#     entrypoint: [""]
+#   needs:
+#     - job: terraform_plan
+#       artifacts: true
+#   before_script:
+#     # Export AWS creds for backend / provider if provided
+#     - |
+#       if [ -n "$AWS_ACCESS_KEY_ID" ]; then
+#         export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
+#         export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
+#         export AWS_DEFAULT_REGION="${AWS_REGION:-ap-south-1}"
+#       fi
+#     # Write kubeconfig if provided
+#     - |
+#       if [ -n "$KUBE_CONFIG_DATA" ]; then
+#         mkdir -p $CI_PROJECT_DIR
+#         echo "$KUBE_CONFIG_DATA" | base64 -d > $CI_PROJECT_DIR/kubeconfig
+#         export KUBECONFIG=$CI_PROJECT_DIR/kubeconfig
+#       fi
+#   script:
+#     - cd terraform
+#     - terraform init -input=false
+#     - terraform apply -input=false -auto-approve plan.tfplan
+#   when: manual 
+#   allow_failure: false
+
 terraform_apply:
   stage: terraform_apply
-  image:
-    name: hashicorp/terraform:1.14
-    entrypoint: [""]
+  # Start from a small image that already has helm
+  image: alpine/helm:4.0.1
+  entrypoint: [""]
   needs:
     - job: terraform_plan
       artifacts: true
+
+  variables:
+    # Terraform version to install on this image
+    TERRAFORM_VERSION: "1.14.0"
+    TF_DIR: "terraform"
+
   before_script:
-    # Export AWS creds for backend / provider if provided
+    - echo "Installing terraform ${TERRAFORM_VERSION} into job image..."
+    # install required utilities and unzip
+    - apk add --no-cache curl unzip bash
+    - curl -fsSLO "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+    - unzip "terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -d /usr/local/bin
+    - terraform --version
+
+    # Export AWS creds for backend/provider if provided
     - |
       if [ -n "$AWS_ACCESS_KEY_ID" ]; then
         export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
         export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
         export AWS_DEFAULT_REGION="${AWS_REGION:-ap-south-1}"
       fi
+
     # Write kubeconfig if provided
     - |
       if [ -n "$KUBE_CONFIG_DATA" ]; then
@@ -83,9 +127,20 @@ terraform_apply:
         echo "$KUBE_CONFIG_DATA" | base64 -d > $CI_PROJECT_DIR/kubeconfig
         export KUBECONFIG=$CI_PROJECT_DIR/kubeconfig
       fi
+
+    # Ensure helm repo is available for terraform helm_release
+    - echo "Adding/updating EKS helm repo for aws-load-balancer-controller..."
+    - helm repo add eks https://aws.github.io/eks-charts || true
+    - helm repo update
+
   script:
-    - cd terraform
+    - echo "Listing terraform files for debug"
+    - ls -la $CI_PROJECT_DIR/$TF_DIR || true
+
+    - cd $CI_PROJECT_DIR/$TF_DIR
+    - terraform --version
     - terraform init -input=false
+    - echo "Applying saved plan (plan.tfplan)..."
     - terraform apply -input=false -auto-approve plan.tfplan
-  when: manual 
-  allow_failure: false
+
+  when: manual
