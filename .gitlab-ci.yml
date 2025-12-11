@@ -8,7 +8,7 @@ stages:
 
 variables:
   IMAGE_TAG: $CI_PIPELINE_ID
-  DOCKER_IMAGE: "akshayreddy1155/simple-time-service"
+  DOCKER_IMAGE: "${DOCKER_USERNAME}/simple-time-service"
   DOCKER_HOST: tcp://docker:2375/
   DOCKER_DRIVER: overlay2
 
@@ -60,36 +60,6 @@ terraform_plan:
       - terraform/plan.tfplan
     expire_in: 1h
 
-# terraform_apply:
-#   stage: terraform_apply
-#   image:
-#     name: hashicorp/terraform:1.14
-#     entrypoint: [""]
-#   needs:
-#     - job: terraform_plan
-#       artifacts: true
-#   before_script:
-#     # Export AWS creds for backend / provider if provided
-#     - |
-#       if [ -n "$AWS_ACCESS_KEY_ID" ]; then
-#         export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
-#         export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
-#         export AWS_DEFAULT_REGION="${AWS_REGION:-ap-south-1}"
-#       fi
-#     # Write kubeconfig if provided
-#     - |
-#       if [ -n "$KUBE_CONFIG_DATA" ]; then
-#         mkdir -p $CI_PROJECT_DIR
-#         echo "$KUBE_CONFIG_DATA" | base64 -d > $CI_PROJECT_DIR/kubeconfig
-#         export KUBECONFIG=$CI_PROJECT_DIR/kubeconfig
-#       fi
-#   script:
-#     - cd terraform
-#     - terraform init -input=false
-#     - terraform apply -input=false -auto-approve plan.tfplan
-#   when: manual 
-#   allow_failure: false
-
 terraform_apply:
   stage: terraform_apply
   # Start from a small image that already has helm
@@ -137,11 +107,10 @@ terraform_apply:
   script:
     - echo "Listing terraform files for debug"
     - ls -la $CI_PROJECT_DIR/$TF_DIR || true
-
     - cd $CI_PROJECT_DIR/$TF_DIR
     - terraform --version
     - terraform init -input=false
     - echo "Applying saved plan (plan.tfplan)..."
     - terraform apply -input=false -auto-approve plan.tfplan
-
+    - terraform output load_balancer_hostname
   when: manual

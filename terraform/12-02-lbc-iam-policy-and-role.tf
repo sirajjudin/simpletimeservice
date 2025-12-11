@@ -13,6 +13,7 @@ output "lbc_iam_policy_arn" {
 
 # Resource: Create IAM Role 
 resource "aws_iam_role" "lbc_iam_role" {
+  depends_on = [ aws_iam_policy.lbc_iam_policy ]
   name = "${var.cluster_name}-lbc-iam-role"
 
   # Terraform's "jsonencode" function converts a Terraform expression result to valid JSON syntax.
@@ -43,6 +44,7 @@ resource "aws_iam_role" "lbc_iam_role" {
 
 # Associate Load Balanacer Controller IAM Policy to  IAM Role
 resource "aws_iam_role_policy_attachment" "lbc_iam_role_policy_attach" {
+  depends_on = [ aws_iam_role.lbc_iam_role, aws_iam_policy.lbc_iam_policy ]
   policy_arn = aws_iam_policy.lbc_iam_policy.arn 
   role       = aws_iam_role.lbc_iam_role.name
 }

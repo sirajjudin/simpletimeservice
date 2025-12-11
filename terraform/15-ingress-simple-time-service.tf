@@ -33,15 +33,12 @@ resource "kubernetes_ingress_v1" "ingress" {
     }
   }
 }
-output "sts_alb_dns_name" {
-  description = "DNS name of the AWS Application Load Balancer created for the simple time service"
-  value       = kubernetes_ingress_v1.ingress.status[0].load_balancer[0].ingress[0].hostname
+
+# Display load balancer hostname 
+output "load_balancer_hostname" {
+  value = kubernetes_ingress_v1.ingress.status.0.load_balancer.0.ingress.0.hostname
 }
 
-output "alb_url" {
-  description = "Public URL to reach the STS app via HTTP"
-  value       = "http://${kubernetes_ingress_v1.ingress.status[0].load_balancer[0].ingress[0].hostname}"
-}
 
 
 
