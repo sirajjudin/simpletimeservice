@@ -43,11 +43,10 @@ trivy_scan:
     TRIVY_SEVERITY: "HIGH,CRITICAL"
   script:
     # If your image is private, login so Trivy can pull it
-    # - if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKER_PASSWORD" ]; then echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin; fi
-    - echo "Scanning image: ${DOCKER_IMAGE}:${IMAGE_TAG},severities: $TRIVY_SEVERITY"
+    # if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKER_PASSWORD" ]; then echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin; fi
+    - echo "Scanning image"
     # Use --exit-code 1 to fail the job on findings, adjust --format (table/json) as you prefer
-    - |
-        trivy image --skip-update --severity $TRIVY_SEVERITY --exit-code 1 --format table ${DOCKER_IMAGE}:${IMAGE_TAG}
+    - trivy image --skip-update --severity $TRIVY_SEVERITY --exit-code 1 --format table ${DOCKER_IMAGE}:${IMAGE_TAG}
   allow_failure: false
 # -----------------------
 # Terraform static/security checks (tflint + tfsec)
