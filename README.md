@@ -127,7 +127,6 @@ The application is:
 │   └── terraform.tfvars                   # Variable values
 │
 ├── images/                               # Screenshots and documentation images
-│   └── gitlab-pipeline-screenshot.png    # GitLab CI/CD pipeline execution screenshot
 ├── .gitlab-ci.yml                        # GitLab CI/CD pipeline
 └── README.md                             # This file
 ```
@@ -624,6 +623,18 @@ Test the health endpoint:
 ```bash
 curl http://<load-balancer-hostname>/health
 ```
+
+#### 6.3 Access Application via Browser
+
+You can also access the application directly in your web browser using the ALB hostname:
+
+![Application accessed via ALB](images/alb-app.png)
+
+*Application running on AWS EKS and accessed through Application Load Balancer*
+
+![Application endpoint response](images/image.png)
+
+*Application endpoint showing timestamp and IP address response*
 
 ---
 
