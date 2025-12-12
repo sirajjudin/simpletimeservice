@@ -487,6 +487,10 @@ Tag the image with your Docker Hub username and version:
 ```bash
 docker tag simple-time-service:local <your-dockerhub-username>/simple-time-service:v1.0.1
 docker push <your-dockerhub-username>/simple-time-service:v1.0.1
+
+docker run -itd -p 8080:80 --name sts-test akshayreddy1155/simple-time-service:v1.0.1
+docker stop sts-test
+docker rm sts-test
 ```
 
 **Note**: Replace `<your-dockerhub-username>` with your actual Docker Hub username.
