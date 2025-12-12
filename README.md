@@ -126,6 +126,8 @@ The application is:
 │   ├── 15-ingress-simple-time-service.tf        # K8s ingress
 │   └── terraform.tfvars                   # Variable values
 │
+├── images/                               # Screenshots and documentation images
+│   └── gitlab-pipeline-screenshot.png    # GitLab CI/CD pipeline execution screenshot
 ├── .gitlab-ci.yml                        # GitLab CI/CD pipeline
 └── README.md                             # This file
 ```
@@ -964,3 +966,13 @@ terraform destroy
 - VPC and networking resources
 - Load balancer and ingress
 - All Kubernetes resources
+
+---
+
+## 📸 Pipeline Screenshot
+
+The `images/` folder contains screenshots used in this documentation. Below is a screenshot of a successful GitLab CI/CD pipeline execution showing all stages completed:
+
+![GitLab CI/CD Pipeline Execution](images/gitlab-pipeline-screenshot.png)
+
+*Pipeline #2211298249 showing successful execution of all stages: docker_build_and_push, security_scan, terraform_plan, and terraform_apply (awaiting manual trigger)*
