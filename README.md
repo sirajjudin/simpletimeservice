@@ -10,14 +10,23 @@ A containerized Flask application deployed on AWS EKS (Elastic Kubernetes Servic
 - [Application Details](#application-details)
 - [Prerequisites](#prerequisites)
 - [Infrastructure Components](#infrastructure-components)
-- [CI/CD Pipeline](#cicd-pipeline)
-- [Deployment Instructions](#deployment-instructions)
-- [Accessing the Application](#accessing-the-application)
+- [Part 1: Manual Deployment](#part-1-manual-deployment)
+  - [Step 1: Configure CLI Tools](#step-1-configure-cli-tools)
+  - [Step 2: Build and Test Docker Image Locally](#step-2-build-and-test-docker-image-locally)
+  - [Step 3: Push Docker Image to Registry](#step-3-push-docker-image-to-registry)
+  - [Step 4: Configure Terraform](#step-4-configure-terraform)
+  - [Step 5: Deploy Infrastructure & app with Terraform](#step-5-deploy-infrastructure-with-terraform)
+  - [Step 6: Access the Application](#step-6-access-the-application)
+- [Part 2: CI/CD Pipeline Deployment](#part-2-cicd-pipeline-deployment)
+  - [Pipeline Overview](#pipeline-overview)
+  - [Pipeline Stages](#pipeline-stages)
+  - [Setting Up GitLab CI/CD](#setting-up-gitlab-cicd)
+  - [Running the Pipeline](#running-the-pipeline)
 - [Security Features](#security-features)
 - [Terraform Configuration](#terraform-configuration)
 - [Troubleshooting](#troubleshooting)
 
-## 🎯 Overview
+## Overview
 
 This project implements a **Simple Time Service** that:
 - Returns the current timestamp in IST (Indian Standard Time - Asia/Kolkata)
@@ -31,7 +40,7 @@ The application is:
 - **Managed** through Terraform for infrastructure provisioning
 - **Automated** via GitLab CI/CD pipeline
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -148,21 +157,83 @@ The application is:
 ### Required Tools
 
 - **Terraform** >= 1.14
+  - Installation guide: [Install Terraform](https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli)
+
 - **AWS CLI** configured with appropriate credentials
+  - Installation guide: [Installing or updating the latest version of the AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+
 - **kubectl** for Kubernetes cluster interaction
+  - Installation guide: [Installing kubectl](https://docs.aws.amazon.com/eks/latest/userguide/install-kubectl.html)
+
 - **Docker** (for local builds)
+  - Installation guide: [Install Docker Engine](https://docs.docker.com/engine/install/)
+
+- **Helm** (for managing Kubernetes packages)
+  - Installation guide: [Installing Helm](https://helm.sh/docs/intro/install/)
+
 - **GitLab** account with CI/CD enabled (for automated pipeline)
+  - **Note**: GitLab Free tier provides 400 minutes per month of CI/CD runner time for pipeline execution
 
 ### AWS Requirements
 
 - AWS account with appropriate permissions
 - S3 bucket for Terraform state backend (configured in `01-versions.tf`)
-- IAM permissions for:
-  - EKS cluster creation
-  - VPC management
-  - EC2 instance management
-  - IAM role creation
-  - S3 access (for state backend)
+- IAM user with programmatic access for Terraform and CI/CD operations
+
+#### Creating IAM User and Security Credentials
+
+Follow these steps to create an IAM user and generate access keys:
+
+1. **Create IAM User**:
+   - Log in to AWS Management Console
+   - Navigate to **IAM** → **Users** → **Create user**
+   - Enter a username (e.g., `terraform-eks-user`)
+   - Select **Provide user access to the AWS Management Console** (optional) or **Access key - Programmatic access** (required for Terraform)
+   - Click **Next**
+
+2. **Attach Permissions**:
+   - Select **Attach policies directly**
+   - Attach the following AWS managed policies:
+     - `AmazonEKSClusterPolicy`
+     - `AmazonEKSNodeGroupPolicy`
+     - `AmazonEKSVPCResourceController`
+     - `AmazonEC2FullAccess` (or more restrictive EC2 permissions)
+     - `AmazonVPCFullAccess` (or more restrictive VPC permissions)
+     - `IAMFullAccess` (or more restrictive IAM permissions for role creation)
+     - `AmazonS3FullAccess` (or more restrictive S3 permissions for state backend)
+   - Alternatively, create a custom policy with minimum required permissions
+   - Click **Next** → **Create user**
+
+3. **Create Security Credentials (Access Keys)**:
+   - Select the created IAM user
+   - Go to **Security credentials** tab
+   - Scroll to **Access keys** section
+   - Click **Create access key**
+   - Select use case: **Command Line Interface (CLI)** or **Application running outside AWS**
+   - Click **Next** → **Create access key**
+   - **Important**: Download or copy the **Access Key ID** and **Secret Access Key**
+   - Store these credentials securely (you won't be able to view the secret key again)
+
+4. **Configure AWS CLI** (for local development):
+   ```bash
+   aws configure
+   ```
+   - Enter your Access Key ID
+   - Enter your Secret Access Key
+   - Enter default region (e.g., `ap-south-1`)
+   - Enter default output format (e.g., `json`)
+
+5. **For GitLab CI/CD**:
+   - Add the Access Key ID and Secret Access Key as CI/CD variables:
+     - `AWS_ACCESS_KEY_ID` = Your Access Key ID
+     - `AWS_SECRET_ACCESS_KEY` = Your Secret Access Key
+
+**Required IAM Permissions Summary**:
+- EKS cluster creation and management
+- VPC management
+- EC2 instance management
+- IAM role creation
+- S3 access (for state backend)
 
 ### GitLab CI/CD Variables
 
@@ -173,7 +244,6 @@ The following variables need to be configured in GitLab CI/CD settings:
 - `AWS_ACCESS_KEY_ID` - AWS access key
 - `AWS_SECRET_ACCESS_KEY` - AWS secret key
 - `AWS_REGION` - AWS region (default: ap-south-1)
-- `KUBE_CONFIG_DATA` - Base64-encoded kubeconfig (optional, for kubectl operations)
 
 ## 🏛️ Infrastructure Components
 
@@ -214,37 +284,256 @@ The following variables need to be configured in GitLab CI/CD settings:
 - **Ingress**: ALB Ingress with health checks
 - **Health Check Path**: `/health`
 
-## 🔄 CI/CD Pipeline
+---
 
-The GitLab CI/CD pipeline consists of 4 stages:
+## Part 1: Manual Deployment
 
-### Stage 1: Docker Build and Push
+This section covers the manual deployment process where you'll build, push, and deploy the application step-by-step using CLI tools.
 
-- Builds Docker image from `./app` directory
-- Tags image with pipeline ID
-- Pushes to Docker Hub registry
+### Step 1: Configure CLI Tools
 
-### Stage 2: Security Scan
+#### 1.1 Configure AWS CLI
 
-**Parallel Jobs:**
-- **Trivy Scan**: Scans Docker image for vulnerabilities (CRITICAL severity)
-- **Terraform Scan**: Runs `tflint` and `tfsec` on Terraform code
+After creating IAM user and access keys (see [AWS Requirements](#aws-requirements)), configure AWS CLI:
 
-### Stage 3: Terraform Plan
+```bash
+aws configure
+```
 
-- Initializes Terraform
-- Creates execution plan
-- Passes Docker image tag as variable
-- Saves plan artifact for next stage
+Enter the following when prompted:
+- **AWS Access Key ID**: Your IAM user's access key
+- **AWS Secret Access Key**: Your IAM user's secret key
+- **Default region name**: `ap-south-1` (or your preferred region)
+- **Default output format**: `json`
 
-### Stage 4: Terraform Apply
+Verify the configuration:
+```bash
+aws sts get-caller-identity
+```
 
-- **Manual Trigger**: Requires manual approval
-- Applies Terraform plan
-- Deploys infrastructure and application
-- Outputs load balancer hostname
+#### 1.2 Configure kubectl
 
-### Pipeline Workflow
+After AWS CLI is configured, set up kubectl to connect to your EKS cluster (after cluster creation):
+
+```bash
+aws eks update-kubeconfig --name eks-demo-cluster --region ap-south-1
+```
+
+Verify connection:
+```bash
+kubectl cluster-info
+```
+
+#### 1.3 Verify Docker Installation
+
+Ensure Docker is installed and running:
+
+```bash
+docker --version
+docker ps
+```
+
+### Step 2: Build and Test Docker Image Locally
+
+#### 2.1 Build Docker Image
+
+Navigate to the app directory and build the Docker image:
+
+```bash
+cd app
+docker build -t simple-time-service:local .
+```
+
+#### 2.2 Test Docker Image Locally
+
+Run the container locally to test:
+
+```bash
+# Give any free host port to run, I am giving 8080
+docker run -itd -p 8080:80 --name sts-test simple-time-service:local
+```
+
+Test the application:
+```bash
+# Test main endpoint
+curl http://localhost:8080/
+
+# Test health endpoint
+curl http://localhost:8080/health
+```
+
+Expected response from main endpoint:
+```json
+{
+  "timestamp": "2024-01-15T10:30:45.123456+05:30",
+  "ip": "172.17.0.1"
+}
+```
+
+Stop and remove the test container:
+```bash
+docker stop sts-test
+docker rm sts-test
+```
+
+### Step 3: Push Docker Image to Registry
+
+#### 3.1 Login to Docker Hub
+
+```bash
+docker login
+```
+
+Enter your Docker Hub username and password when prompted.
+
+#### 3.2 Tag and Push Image
+
+Tag the image with your Docker Hub username and version:
+
+```bash
+docker tag simple-time-service:local <your-dockerhub-username>/simple-time-service:v1.0.1
+docker push <your-dockerhub-username>/simple-time-service:v1.0.1
+```
+
+**Note**: Replace `<your-dockerhub-username>` with your actual Docker Hub username.
+
+### Step 4: Configure Terraform
+
+#### 4.1 Create S3 Bucket for Terraform State
+
+Create an S3 bucket to store Terraform state (if not already created):
+
+**Note**: Bucket names must be globally unique. Change `terraform-on-aws-eks-akshay` to your unique bucket name.
+
+#### 4.2 Update Terraform Configuration
+
+1. **Update Backend Configuration** (if needed):
+   - Edit `terraform/01-versions.tf`
+   - Update the S3 bucket name, key, and region in the backend block
+   - For local testing, you can comment out the entire backend block to store state locally
+   - **Note**: State locking using DynamoDB table is deprecated. Use `use_lockfile = true` for enabling state locking
+
+2. **Update Terraform Variables**:
+   - Edit `terraform/terraform.tfvars`
+   - Update values according to your requirements:
+     ```hcl
+     aws_region = "ap-south-1"
+     cluster_name = "eks-demo-cluster"
+     cluster_version = "1.33"
+     vpc_availability_zones = ["ap-south-1a", "ap-south-1b"]
+     vpc_public_subnets = ["10.0.101.0/24", "10.0.102.0/24"]
+     vpc_private_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
+     cluster_service_ipv4_cidr = "172.20.0.0/16"
+     cluster_endpoint_private_access = false
+     cluster_endpoint_public_access = true
+     ```
+
+### Step 5: Deploy Infrastructure & app with Terraform
+
+#### 5.1 Add Helm Repository for AWS Load Balancer Controller
+
+Before initializing Terraform, add the AWS EKS Helm repository which is required for installing the AWS Load Balancer Controller:
+
+```bash
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update eks
+```
+
+Verify the repository was added:
+```bash
+helm repo list
+```
+
+#### 5.2 Initialize Terraform
+
+Navigate to the terraform directory and initialize:
+
+```bash
+cd terraform
+terraform init
+```
+
+This will:
+- Download required providers
+- Initialize the S3 backend (if configured)
+- Set up the working directory
+
+#### 5.3 Create Terraform Plan
+
+Create an execution plan with your Docker image:
+
+```bash
+terraform plan 
+```
+
+Review the plan to see what resources will be created:
+- VPC and subnets
+- EKS cluster
+- Node groups
+- Security groups
+- IAM roles
+- AWS Load Balancer Controller
+- Kubernetes deployment, service, and ingress
+
+#### 5.4 Apply Terraform Configuration
+
+Apply the plan to create all resources:
+
+```bash
+terraform apply -auto-approve
+```
+
+**Expected Timeline**:
+- EKS cluster creation: ~15-20 minutes
+- Node group creation: ~5-10 minutes
+- ALB provisioning: ~2-5 minutes
+- **Total**: ~20-35 minutes
+
+#### 5.5 Configure kubectl for EKS Cluster
+
+After the EKS cluster is created, configure kubectl:
+
+```bash
+aws eks update-kubeconfig --name eks-demo-cluster --region ap-south-1
+```
+
+Verify cluster access:
+```bash
+kubectl get nodes
+kubectl get pods
+```
+
+### Step 6: Access the Application
+
+#### 6.1 Get Load Balancer Hostname
+
+After deployment completes, get the ALB hostname:
+
+```bash
+terraform output load_balancer_hostname
+```
+
+#### 6.2 Test Application Endpoints
+
+Test the main endpoint:
+```bash
+curl http://<load-balancer-hostname>/
+```
+
+Test the health endpoint:
+```bash
+curl http://<load-balancer-hostname>/health
+```
+
+---
+
+## Part 2: CI/CD Pipeline Deployment
+
+This section covers automated deployment using GitLab CI/CD pipeline, which automates Docker builds, security scanning, and infrastructure deployment.
+
+### Pipeline Overview
+
+The GitLab CI/CD pipeline automates the entire deployment process:
 
 ```
 Manual Trigger (Web UI)
@@ -262,103 +551,151 @@ Terraform Apply
 Application Deployed
 ```
 
-## 🚀 Deployment Instructions
+### Pipeline Stages
 
-### Option 1: Automated Deployment via GitLab CI/CD
+The pipeline consists of 4 stages executed sequentially:
 
-1. **Configure GitLab CI/CD Variables**:
-   - Navigate to GitLab project → Settings → CI/CD → Variables
-   - Add all required variables (see Prerequisites section)
+#### Stage 1: Docker Build and Push
 
-2. **Trigger Pipeline**:
-   - Go to CI/CD → Pipelines
-   - Click "Run Pipeline" (manual trigger via web UI)
-   - Pipeline will build, scan, plan, and wait for manual approval
+- **Job**: `docker_build_and_push_job`
+- **Actions**:
+  - Builds Docker image from `./app` directory
+  - Tags image with pipeline ID (`$CI_PIPELINE_ID`)
+  - Pushes to Docker Hub registry
+- **Image**: `docker:latest` with Docker-in-Docker service
+- **Output**: Docker image available in registry
 
-3. **Approve Deployment**:
-   - After Terraform plan completes, manually approve the `terraform_apply` job
-   - Monitor the pipeline for completion
+#### Stage 2: Security Scan
 
-4. **Get Application URL**:
-   - After successful deployment, check Terraform outputs for `load_balancer_hostname`
-   - Or run: `terraform output load_balancer_hostname` in the terraform directory
+**Parallel Jobs:**
 
-### Option 2: Manual Deployment
+1. **Trivy Scan** (`trivy_scan`):
+   - Scans Docker image for vulnerabilities
+   - Severity level: CRITICAL
+   - Fails pipeline if critical vulnerabilities found
+   - Image: `aquasec/trivy:0.68.1`
 
-1. **Build and Push Docker Image**:
-   ```bash
-   cd app
-   docker build -t <your-dockerhub-username>/simple-time-service:v1.0.1 .
-   docker login
-   docker push <your-dockerhub-username>/simple-time-service:v1.0.1
-   # Give a free port on a server to run the container
-   docker run -itd -p <host-port>:80 --name sts <your-dockerhub-username>/simple-time-service:v1.0.1
-   http://<server-ip>:<host-port>
-   ```
+2. **Terraform Scan** (`terraform_scan`):
+   - Runs `tflint` for Terraform linting
+   - Runs `tfsec` for security scanning
+   - Allows failure (non-blocking)
+   - Image: `alpine:3.18`
 
-2. **Configure Terraform Variables**:
-   - Update `terraform/terraform.tfvars` with your values
-   - Ensure S3 backend bucket exists (configured in `01-versions.tf`)
-   - Change the bucket, key and region to store state and lock file remotely, for testing purpose you can comment entire backend block if you want to store state locally. state locking using dynamodb table is deprecated, we have to give use_lockfile = true for enabling state locking.
+#### Stage 3: Terraform Plan
 
+- **Job**: `terraform_plan`
+- **Actions**:
+  - Initializes Terraform
+  - Creates execution plan
+  - Passes Docker image tag as variable (`deploy_image`)
+  - Saves plan artifact for next stage
+- **Image**: `hashicorp/terraform:1.14`
+- **Output**: `plan.tfplan` artifact (expires in 1 hour)
 
-3. **Initialize and Apply Terraform**:
-   ```bash
-   cd terraform
-   terraform init
-   terraform plan -var "deploy_image=<your-dockerhub-username>/simple-time-service:v1.0.1"
-   terraform apply
-   ```
+#### Stage 4: Terraform Apply
 
-4. **Wait for Resources**:
-   - EKS cluster creation: ~15-20 minutes
-   - Node group creation: ~5-10 minutes
-   - ALB provisioning: ~2-5 minutes
+- **Job**: `terraform_apply`
+- **Actions**:
+  - Applies saved Terraform plan
+  - Deploys infrastructure and application
+  - Outputs load balancer hostname
+- **Image**: `alpine/helm:4.0.1` (with Terraform installed)
+- **Trigger**: Manual (requires approval)
+- **Dependencies**: Requires `terraform_plan` artifact
 
-5. **Get Application URL**:
+### Setting Up GitLab CI/CD
+
+#### 1. Configure GitLab CI/CD Variables
+
+Navigate to your GitLab project:
+- Go to **Settings** → **CI/CD** → **Variables**
+- Expand **Variables** section
+- Add the following variables:
+
+| Variable | Type | Protected | Masked | Description |
+|----------|------|-----------|--------|-------------|
+| `DOCKER_USERNAME` | Variable | No | No | Docker Hub username |
+| `DOCKER_PASSWORD` | Variable | No | Yes | Docker Hub password/token |
+| `AWS_ACCESS_KEY_ID` | Variable | No | Yes | AWS IAM user access key |
+| `AWS_SECRET_ACCESS_KEY` | Variable | No | Yes | AWS IAM user secret key |
+| `AWS_REGION` | Variable | No | No | AWS region (default: `ap-south-1`) |
+| `KUBE_CONFIG_DATA` | Variable | No | Yes | Base64-encoded kubeconfig (optional) |
+
+**Security Best Practices**:
+- Mark sensitive variables (passwords, keys) as **Masked**
+- Mark production variables as **Protected** (only available in protected branches)
+- Use Docker Hub access tokens instead of passwords
+
+#### 2. Verify Pipeline Configuration
+
+Ensure `.gitlab-ci.yml` is present in the repository root. The pipeline is configured to:
+- Only run on manual trigger via web UI
+- Execute on `main` branch for Docker build
+- Require manual approval for Terraform apply
+
+### Running the Pipeline
+
+#### 1. Trigger Pipeline Manually
+
+1. Navigate to **Build** → **Pipelines** in your GitLab project
+2. Click **Run Pipeline** button
+3. Select branch (usually `main`)
+4. Click **Run Pipeline**
+
+#### 2. Monitor Pipeline Execution
+
+Watch the pipeline progress through stages:
+
+1. **Docker Build and Push**: 
+   - Builds and pushes image to Docker Hub
+   - Image tag: `<DOCKER_USERNAME>/simple-time-service:<PIPELINE_ID>`
+
+2. **Security Scans**:
+   - Trivy scans the Docker image
+   - Terraform scans the infrastructure code
+   - Both run in parallel
+
+3. **Terraform Plan**:
+   - Creates execution plan
+   - Review the plan output in job logs
+   - Plan artifact is saved for apply stage
+
+4. **Terraform Apply** (Manual):
+   - Job appears with "play" button
+   - Click **Play** to approve and execute
+   - Monitor logs for deployment progress
+
+#### 3. Get Application URL
+
+After successful deployment:
+
+1. Check pipeline job output for `load_balancer_hostname`
+2. Or run in GitLab CI/CD job:
    ```bash
    terraform output load_balancer_hostname
    ```
 
-## 🌐 Accessing the Application
+#### 4. Verify Deployment
 
-After successful deployment, access the application using the ALB hostname:
-
-### Main Endpoint
+Test the deployed application:
 ```bash
+# Main endpoint
 curl http://<load-balancer-hostname>/
-```
 
-**Response:**
-```json
-{
-  "timestamp": "2024-01-15T10:30:45.123456+05:30",
-  "ip": "203.0.113.1"
-}
-```
-
-### Health Check Endpoint
-```bash
+# Health endpoint
 curl http://<load-balancer-hostname>/health
 ```
 
-**Response:**
-```
-ok
-```
+### Pipeline Configuration Details
 
-### Get Load Balancer Hostname
+The pipeline configuration (`.gitlab-ci.yml`) includes:
 
-**Via Terraform:**
-```bash
-cd terraform
-terraform output load_balancer_hostname
-```
-
-**Via kubectl:**
-```bash
-kubectl get ingress ingress-sts-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-```
+- **Workflow Rules**: Only runs on manual web trigger
+- **Docker-in-Docker**: Enabled for Docker builds
+- **Artifact Management**: Terraform plan saved between stages
+- **Security Scanning**: Integrated Trivy and Terraform security tools
+- **Manual Gates**: Terraform apply requires manual approval
+- **Error Handling**: Proper error handling and logging
 
 ## 🔒 Security Features
 
