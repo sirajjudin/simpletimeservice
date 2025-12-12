@@ -54,7 +54,7 @@ trivy_scan:
 terraform_scan:
   stage: security_scan
   image:
-    name: docker:latest
+    name: alpine:3.18
     entrypoint: [""]
   needs:
     - job: docker_build_and_push_job
