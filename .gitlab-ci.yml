@@ -62,12 +62,13 @@ terraform_scan:
   variables:
     TF_DIR: "terraform"
   before_script:
-    - apk add --no-cache curl bash unzip git
+    - apk add --no-cache curl bash unzip git ca-certificates coreutils
     # install tflint
-    - curl -sL https://github.com/terraform-linters/tflint/releases/latest/download/tflint_linux_amd64.zip -o /tmp/tflint.zip
+    - curl -sL "https://github.com/terraform-linters/tflint/releases/latest/download/tflint_linux_amd64.zip" -o /tmp/tflint.zip
     - unzip /tmp/tflint.zip -d /usr/local/bin
+    - chmod +x /usr/local/bin/tflint
     - tflint --version
-    # install tfsec
+    # install tfsec (installer uses sha256sum --quiet which coreutils provides)
     - curl -sSL https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
     - tfsec --version
   script:
