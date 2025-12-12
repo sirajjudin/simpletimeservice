@@ -188,14 +188,13 @@ Follow these steps to create an IAM user and generate access keys:
    - Log in to AWS Management Console
    - Navigate to **IAM** → **Users** → **Create user**
    - Enter a username (e.g., `terraform-eks-user`)
-   - Select **Provide user access to the AWS Management Console** (optional) or **Access key - Programmatic access** (required for Terraform)
    - Click **Next**
 
 2. **Attach Permissions**:
    - Select **Attach policies directly**
    - Attach the following AWS managed policies:
      - `AmazonEKSClusterPolicy`
-     - `AmazonEKSNodeGroupPolicy`
+     - `AWSServiceRoleForAmazonEKSNodegroup`
      - `AmazonEKSVPCResourceController`
      - `AmazonEC2FullAccess` (or more restrictive EC2 permissions)
      - `AmazonVPCFullAccess` (or more restrictive VPC permissions)
@@ -234,6 +233,51 @@ Follow these steps to create an IAM user and generate access keys:
 - EC2 instance management
 - IAM role creation
 - S3 access (for state backend)
+
+### Docker Hub Requirements
+
+- Docker Hub account
+- Docker Hub access token for authentication (recommended over password)
+
+#### Creating Docker Hub Access Token
+
+Follow these steps to create a Docker Hub access token:
+
+1. **Log in to Docker Hub**:
+   - Go to [Docker Hub](https://hub.docker.com/)
+   - Sign in with your Docker Hub account
+
+2. **Navigate to Account Settings**:
+   - Click on your username in the top right corner
+   - Select **Account Settings** from the dropdown menu
+
+3. **Create Access Token**:
+   - In the left sidebar, click **Security**
+   - Click **New Access Token** button
+   - Enter a description for the token (e.g., `terraform-eks-deployment` or `gitlab-ci-cd`)
+   - Select permissions:
+     - **Read, Write & Delete** (for full access to push/pull images)
+     - Or **Read & Write** (for push/pull only)
+   - Click **Generate**
+
+4. **Copy and Store Token**:
+   - **Important**: Copy the access token immediately
+   - Store it securely (you won't be able to view it again)
+   - The token will be displayed only once
+
+5. **Use Token for Authentication**:
+
+   **For Local Docker Login**:
+   ```bash
+   docker login -u <your-dockerhub-username>
+   # When prompted for password, enter the access token (not your Docker Hub password)
+   ```
+
+   **For GitLab CI/CD**:
+   - Use the access token as the value for `DOCKER_PASSWORD` CI/CD variable
+   - Username goes in `DOCKER_USERNAME` variable
+
+**Note**: Access tokens are more secure than passwords and can be revoked individually. It's recommended to use tokens instead of passwords for CI/CD pipelines.
 
 ### GitLab CI/CD Variables
 
