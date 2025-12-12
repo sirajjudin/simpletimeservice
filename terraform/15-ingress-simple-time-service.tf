@@ -36,7 +36,11 @@ resource "kubernetes_ingress_v1" "ingress" {
 
 # Display load balancer hostname 
 output "load_balancer_hostname" {
-  value = kubernetes_ingress_v1.ingress.status.0.load_balancer.0.ingress.0.hostname
+  description = "DNS name of ALB created for the ingress (empty if not ready yet)"
+  value       = try(
+    kubernetes_ingress_v1.ingress.status[0].load_balancer[0].ingress[0].hostname,
+    ""
+  )
 }
 
 
