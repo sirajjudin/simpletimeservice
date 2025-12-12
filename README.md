@@ -193,17 +193,67 @@ Follow these steps to create an IAM user and generate access keys:
 2. **Attach Permissions**:
    - Select **Attach policies directly**
    - Attach the following AWS managed policies:
-     - `AmazonEKSClusterPolicy`
-     - `AWSServiceRoleForAmazonEKSNodegroup`
-     - `AmazonEKSVPCResourceController`
      - `AmazonEC2FullAccess` (or more restrictive EC2 permissions)
      - `AmazonVPCFullAccess` (or more restrictive VPC permissions)
      - `IAMFullAccess` (or more restrictive IAM permissions for role creation)
      - `AmazonS3FullAccess` (or more restrictive S3 permissions for state backend)
-   - Alternatively, create a custom policy with minimum required permissions
    - Click **Next** → **Create user**
 
-3. **Create Security Credentials (Access Keys)**:
+3. **Create and Attach Inline IAM Policy for EKS**:
+
+   After creating the IAM user, create an inline policy with EKS-specific permissions:
+
+   a. **Navigate to the IAM User**:
+      - Go to **IAM** → **Users**
+      - Click on the user you just created
+
+   b. **Add Inline Policy**:
+      - Click on the **Permissions** tab
+      - Scroll down to **Permissions policies** section
+      - Click **Add permissions** → **Create inline policy**
+
+   c. **Switch to JSON Editor**:
+      - Click on the **JSON** tab
+      - Delete any existing content in the editor
+
+   d. **Paste the Policy JSON**:
+      Copy and paste the following policy JSON:
+
+      ```json
+      {
+          "Version": "2012-10-17",
+          "Statement": [
+              {
+                  "Sid": "EKSAdmin",
+                  "Effect": "Allow",
+                  "Action": [
+                      "eks:*"
+                  ],
+                  "Resource": "*"
+              },
+              {
+                  "Sid": "PassRoleForEKS",
+                  "Effect": "Allow",
+                  "Action": "iam:PassRole",
+                  "Resource": "*",
+                  "Condition": {
+                      "StringEquals": {
+                          "iam:PassedToService": "eks.amazonaws.com"
+                      }
+                  }
+              }
+          ]
+      }
+      ```
+
+   e. **Review and Create Policy**:
+      - Click **Next** to review the policy
+      - Enter a policy name (e.g., `EKS-Terraform-Policy`)
+      - Click **Create policy**
+
+   **Note**: This inline policy provides full EKS permissions and the ability to pass IAM roles to EKS service. It works in conjunction with the managed policies attached in step 2.
+
+4. **Create Security Credentials (Access Keys)**:
    - Select the created IAM user
    - Go to **Security credentials** tab
    - Scroll to **Access keys** section
@@ -213,7 +263,7 @@ Follow these steps to create an IAM user and generate access keys:
    - **Important**: Download or copy the **Access Key ID** and **Secret Access Key**
    - Store these credentials securely (you won't be able to view the secret key again)
 
-4. **Configure AWS CLI** (for local development):
+5. **Configure AWS CLI** (for local development):
    ```bash
    aws configure
    ```
@@ -222,7 +272,7 @@ Follow these steps to create an IAM user and generate access keys:
    - Enter default region (e.g., `ap-south-1`)
    - Enter default output format (e.g., `json`)
 
-5. **For GitLab CI/CD**:
+6. **For GitLab CI/CD**:
    - Add the Access Key ID and Secret Access Key as CI/CD variables:
      - `AWS_ACCESS_KEY_ID` = Your Access Key ID
      - `AWS_SECRET_ACCESS_KEY` = Your Secret Access Key
