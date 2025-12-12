@@ -3,6 +3,7 @@ workflow:
     - if: '$CI_PIPELINE_SOURCE == "web"'  # Only run if manually triggered via UI
 stages:
   - docker_build_and_push
+  - security_scan  
   - terraform_plan
   - terraform_apply
 
@@ -26,7 +27,58 @@ docker_build_and_push_job:
     - docker push $DOCKER_IMAGE:$IMAGE_TAG
   only:
     - main
-
+# -----------------------
+# Image vulnerability scan (Trivy)
+# -----------------------
+trivy_scan:
+  stage: security_scan
+  image:
+    name: aquasec/trivy:0.68.1
+    entrypoint: [""]
+  needs:
+    - job: docker_build_and_push_job
+      artifacts: false
+  variables:
+    # Fail pipeline if any HIGH or CRITICAL vuln is found
+    TRIVY_SEVERITY: "HIGH,CRITICAL"
+  script:
+    # If your image is private, login so Trivy can pull it
+    # - if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKER_PASSWORD" ]; then echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin; fi
+    - echo "Scanning image: ${DOCKER_IMAGE}:${IMAGE_TAG} (severities: $TRIVY_SEVERITY)"
+    # Use --exit-code 1 to fail the job on findings, adjust --format (table/json) as you prefer
+    - trivy image --skip-update --severity $TRIVY_SEVERITY --exit-code 1 --format table ${DOCKER_IMAGE}:${IMAGE_TAG}
+  allow_failure: false
+# -----------------------
+# Terraform static/security checks (tflint + tfsec)
+# -----------------------
+terraform_scan:
+  stage: security_scan
+  image:
+    name: docker:latest
+    entrypoint: [""]
+  needs:
+    - job: docker_build_and_push_job
+      artifacts: false
+  variables:
+    TF_DIR: "terraform"
+  before_script:
+    - apk add --no-cache curl bash unzip git
+    # install tflint
+    - curl -sL https://github.com/terraform-linters/tflint/releases/latest/download/tflint_linux_amd64.zip -o /tmp/tflint.zip
+    - unzip /tmp/tflint.zip -d /usr/local/bin
+    - tflint --version
+    # install tfsec
+    - curl -sSL https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
+    - tfsec --version
+  script:
+    - echo "Running tflint and tfsec against $TF_DIR"
+    - if [ ! -d "$CI_PROJECT_DIR/$TF_DIR" ]; then echo "No terraform dir ($TF_DIR) found — skipping scans"; exit 1; fi
+    - cd $CI_PROJECT_DIR/$TF_DIR
+    # tflint lint (optional: install plugins, set config)
+    - tflint || (echo "tflint found issues"; exit 1)
+    # tfsec security scan (fails on issues)
+    - tfsec . || (echo "tfsec found issues"; exit 1)
+  
 terraform_plan:
   stage: terraform_plan
   image:
