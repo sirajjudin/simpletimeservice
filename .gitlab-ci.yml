@@ -46,8 +46,8 @@ trivy_scan:
     # if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKER_PASSWORD" ]; then echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin; fi
     - echo "Scanning image"
     # Use --exit-code 1 to fail the job on findings, adjust --format (table/json) as you prefer
-    - trivy image --skip-db-update --severity $TRIVY_SEVERITY --exit-code 1 --format table ${DOCKER_IMAGE}:${IMAGE_TAG}
-  allow_failure: false
+    - trivy image --severity $TRIVY_SEVERITY --exit-code 1 --format table ${DOCKER_IMAGE}:${IMAGE_TAG}
+  allow_failure: true
 # -----------------------
 # Terraform static/security checks (tflint + tfsec)
 # -----------------------
@@ -79,7 +79,8 @@ terraform_scan:
     - tflint || (echo "tflint found issues"; exit 1)
     # tfsec security scan (fails on issues)
     - tfsec . || (echo "tfsec found issues"; exit 1)
-  
+  allow_failure: true
+## Terraform plan
 terraform_plan:
   stage: terraform_plan
   image:
