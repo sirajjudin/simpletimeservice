@@ -1,170 +1,230 @@
-workflow:
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "web"'  # Only run if manually triggered via UI
-stages:
-  - docker_build_and_push
-  - security_scan  
-  - terraform_plan
-  - terraform_apply
+name: CI/CD Pipeline
 
-variables:
-  IMAGE_TAG: $CI_PIPELINE_ID
-  DOCKER_IMAGE: "${DOCKER_USERNAME}/simple-time-service"
-  DOCKER_HOST: tcp://docker:2375/
-  DOCKER_DRIVER: overlay2
+on:
+  workflow_dispatch:  # equivalent to: rules: if: $CI_PIPELINE_SOURCE == "web"
 
-docker_build_and_push_job:
-  stage: docker_build_and_push
-  image: docker:latest
-  services:
-    - docker:dind
-  variables:
-    DOCKER_TLS_CERTDIR: ""
-  script:
-    - echo "Building image $DOCKER_IMAGE:$IMAGE_TAG from ./app"
-    - docker build -t $DOCKER_IMAGE:$IMAGE_TAG ./app
-    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-    - docker push $DOCKER_IMAGE:$IMAGE_TAG
-  only:
-    - main
-# -----------------------
-# Image vulnerability scan (Trivy)
-# -----------------------
-trivy_scan:
-  stage: security_scan
-  image:
-    name: aquasec/trivy:0.68.1
-    entrypoint: [""]
-  needs:
-    - job: docker_build_and_push_job
-      artifacts: false
-  variables:
-    # Fail pipeline if any HIGH or CRITICAL vuln is found
-    TRIVY_SEVERITY: "CRITICAL"
-  script:
-    # If your image is private, login so Trivy can pull it
-    # if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKER_PASSWORD" ]; then echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin; fi
-    - echo "Scanning image"
-    # Use --exit-code 1 to fail the job on findings, adjust --format (table/json) as you prefer
-    - trivy image --severity $TRIVY_SEVERITY --exit-code 1 --format table ${DOCKER_IMAGE}:${IMAGE_TAG}
-  allow_failure: false
-# -----------------------
-# Terraform static/security checks (tflint + tfsec)
-# -----------------------
-terraform_scan:
-  stage: security_scan
-  image:
-    name: alpine:3.18
-    entrypoint: [""]
-  needs:
-    - job: docker_build_and_push_job
-      artifacts: false
-  variables:
-    TF_DIR: "terraform"
-  before_script:
-    - apk add --no-cache curl bash unzip git ca-certificates coreutils
-    # install tflint
-    - curl -sL "https://github.com/terraform-linters/tflint/releases/latest/download/tflint_linux_amd64.zip" -o /tmp/tflint.zip
-    - unzip /tmp/tflint.zip -d /usr/local/bin
-    - chmod +x /usr/local/bin/tflint
-    - tflint --version
-    # install tfsec (installer uses sha256sum --quiet which coreutils provides)
-    - curl -sSL https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
-    - tfsec --version
-  script:
-    - echo "Running tflint and tfsec against $TF_DIR"
-    - if [ ! -d "$CI_PROJECT_DIR/$TF_DIR" ]; then echo "No terraform dir ($TF_DIR) found — skipping scans"; exit 1; fi
-    - cd $CI_PROJECT_DIR/$TF_DIR
-    # tflint lint 
-    - tflint || (echo "tflint found issues";)
-    # tfsec security scan 
-    - tfsec . || (echo "tfsec found issues";)
-  allow_failure: true
-## Terraform plan
-terraform_plan:
-  stage: terraform_plan
-  image:
-    name: hashicorp/terraform:1.14
-    entrypoint: [""]
-  needs:
-    - job: docker_build_and_push_job
-      artifacts: false
-  before_script:
-    # Export AWS creds for backend / provider if provided
-    - |
-      if [ -n "$AWS_ACCESS_KEY_ID" ]; then
-        export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
-        export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
-        export AWS_DEFAULT_REGION="${AWS_REGION:-ap-south-1}"
-      fi
-    # write kubeconfig if provided (optional)
-    - |
-      if [ -n "$KUBE_CONFIG_DATA" ]; then
-        mkdir -p $CI_PROJECT_DIR
-        echo "$KUBE_CONFIG_DATA" | base64 -d > $CI_PROJECT_DIR/kubeconfig
-        export KUBECONFIG=$CI_PROJECT_DIR/kubeconfig
-      fi
-  script:
-    - cd terraform
-    - terraform init -input=false -upgrade
-    # pass the built image into terraform as var "deploy_image"
-    - terraform plan -input=false -out=plan.tfplan -var "deploy_image=${DOCKER_IMAGE}:${IMAGE_TAG}"
-  artifacts:
-    paths:
-      - terraform/plan.tfplan
-    expire_in: 1h
+env:
+  DOCKER_IMAGE: "${{ vars.DOCKER_USERNAME }}/simple-time-service"
+  # IMAGE_TAG will be set per-run via a unique value (run ID)
 
-terraform_apply:
-  stage: terraform_apply
-  # Start from a small image that already has helm
-  image: 
-    name: alpine/helm:4.0.1
-    entrypoint: [""]
-  needs:
-    - job: terraform_plan
-      artifacts: true
+jobs:
+  # -----------------------
+  # Docker build and push
+  # -----------------------
+  docker_build_and_push_job:
+    name: docker_build_and_push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'  # equivalent to: only: [main]
 
-  variables:
-    # Terraform version to install on this image
-    TERRAFORM_VERSION: "1.14.2"
-    TF_DIR: "terraform"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  before_script:
-    - echo "Installing terraform ${TERRAFORM_VERSION} into job image..."
-    # install required utilities and unzip
-    - apk add --no-cache curl unzip bash
-    - curl -fsSLO "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
-    - unzip "terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -d /usr/local/bin
-    - terraform --version
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    # Export AWS creds for backend/provider if provided
-    - |
-      if [ -n "$AWS_ACCESS_KEY_ID" ]; then
-        export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
-        export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
-        export AWS_DEFAULT_REGION="${AWS_REGION:-ap-south-1}"
-      fi
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-    # Write kubeconfig if provided
-    - |
-      if [ -n "$KUBE_CONFIG_DATA" ]; then
-        mkdir -p $CI_PROJECT_DIR
-        echo "$KUBE_CONFIG_DATA" | base64 -d > $CI_PROJECT_DIR/kubeconfig
-        export KUBECONFIG=$CI_PROJECT_DIR/kubeconfig
-      fi
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ github.run_id }}
+          # Optional: also tag as latest on main
+          # tags: |
+          #   ${{ env.DOCKER_IMAGE }}:${{ github.run_id }}
+          #   ${{ env.DOCKER_IMAGE }}:latest
 
-    # Ensure helm repo is available for terraform helm_release
-    - echo "Adding/updating EKS helm repo for aws-load-balancer-controller..."
-    - helm repo add eks https://aws.github.io/eks-charts || true
-    - helm repo update
+      - name: Export image tag for downstream jobs
+        run: |
+          echo "IMAGE_TAG=${{ github.run_id }}" >> "$GITHUB_ENV"
 
-  script:
-    - echo "Listing terraform files for debug"
-    - ls -la $CI_PROJECT_DIR/$TF_DIR || true
-    - cd $CI_PROJECT_DIR/$TF_DIR
-    - terraform --version
-    - terraform init -input=false
-    - echo "Applying saved plan (plan.tfplan)..."
-    - terraform apply -input=false -auto-approve plan.tfplan
-    - terraform output load_balancer_hostname
-  when: manual
+  # -----------------------
+  # Image vulnerability scan (Trivy)
+  # -----------------------
+  trivy_scan:
+    name: trivy_scan
+    runs-on: ubuntu-latest
+    needs:
+      - docker_build_and_push_job
+    # Fail job if CRITICAL vulns found
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub (so Trivy can pull private image)
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Run Trivy image scan
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: "${{ env.DOCKER_IMAGE }}:${{ github.run_id }}"
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL"
+        # allow-failure: false is default; job fails if Trivy exits 1
+
+  # -----------------------
+  # Terraform static/security checks (tflint + tfsec)
+  # -----------------------
+  terraform_scan:
+    name: terraform_scan
+    runs-on: ubuntu-latest
+    needs:
+      - docker_build_and_push_job
+    continue-on-error: true  # equivalent to allow_failure: true
+
+    env:
+      TF_DIR: "terraform"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install tflint and tfsec
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y curl unzip bash ca-certificates coreutils
+
+          # tflint
+          curl -sL "https://github.com/terraform-linters/tflint/releases/latest/download/tflint_linux_amd64.zip" -o /tmp/tflint.zip
+          unzip /tmp/tflint.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/tflint
+          tflint --version
+
+          # tfsec
+          curl -sSL "https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh" | sudo bash
+          tfsec --version
+
+      - name: Run tflint and tfsec
+        run: |
+          set -e
+          echo "Running tflint and tfsec against $TF_DIR"
+          if [ ! -d "$GITHUB_WORKSPACE/$TF_DIR" ]; then
+            echo "No terraform dir ($TF_DIR) found — skipping scans"
+            exit 1
+          fi
+          cd "$GITHUB_WORKSPACE/$TF_DIR"
+
+          # tflint (non-fatal because continue-on-error: true at job level)
+          tflint || echo "tflint found issues"
+
+          # tfsec (non-fatal)
+          tfsec . || echo "tfsec found issues"
+
+  # -----------------------
+  # Terraform plan
+  # -----------------------
+  terraform_plan:
+    name: terraform_plan
+    runs-on: ubuntu-latest
+    needs:
+      - docker_build_and_push_job
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: "${{ vars.AWS_REGION || 'ap-south-1' }}"
+      TF_DIR: "terraform"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.0
+
+      - name: Write kubeconfig (if provided)
+        if: ${{ secrets.KUBE_CONFIG_DATA != '' }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE"
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > "$GITHUB_WORKSPACE/kubeconfig"
+          echo "KUBECONFIG=$GITHUB_WORKSPACE/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Terraform init and plan
+        run: |
+          set -e
+          cd "$GITHUB_WORKSPACE/terraform"
+          terraform init -input=false -upgrade
+          terraform plan -input=false -out=plan.tfplan -var "deploy_image=${{ env.DOCKER_IMAGE }}:${{ github.run_id }}"
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/plan.tfplan
+          retention-days: 1
+
+  # -----------------------
+  # Terraform apply (manual)
+  # -----------------------
+  terraform_apply:
+    name: terraform_apply
+    runs-on: ubuntu-latest
+    needs:
+      - terraform_plan
+    # Manual approval equivalent to GitLab's when: manual
+    environment: production  # optional: use GitHub Environments for approvals
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: "${{ vars.AWS_REGION || 'ap-south-1' }}"
+      TERRAFORM_VERSION: "1.14.2"
+      TF_DIR: "terraform"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v4.0.1"
+
+      - name: Write kubeconfig (if provided)
+        if: ${{ secrets.KUBE_CONFIG_DATA != '' }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE"
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > "$GITHUB_WORKSPACE/kubeconfig"
+          echo "KUBECONFIG=$GITHUB_WORKSPACE/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Add EKS Helm repo
+        run: |
+          helm repo add eks https://aws.github.io/eks-charts || true
+          helm repo update
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: terraform
+
+      - name: Terraform init and apply
+        run: |
+          set -e
+          echo "Listing terraform files for debug"
+          ls -la "$GITHUB_WORKSPACE/$TF_DIR" || true
+          cd "$GITHUB_WORKSPACE/$TF_DIR"
+          terraform --version
+          terraform init -input=false
+          echo "Applying saved plan (plan.tfplan)..."
+          terraform apply -input=false -auto-approve plan.tfplan
+          terraform output load_balancer_hostname
